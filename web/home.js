@@ -76,7 +76,9 @@
     ['jellyfin', /jellyfin/i, /jellyfin/i, ['#AA5CC3', '#00A4DC']],
     ['spotify', /spotify/, /spotify/i, ['#1DB954', '#0F7A36']]
   ];
-  var MAX_SHELF = 8;
+  // Apps shown at once, as on Android: as many as fit with tiles at least 128 wide (1760 of content, 48 between tiles);
+  // the shelf scrolls for the rest. The built-in list keeps 8.
+  var SHELF_VISIBLE = 10, FEW_APPS = 8;
 
   function shelfKey(app) {
     for (var i = 0; i < SHELF.length; i++) if (SHELF[i][1].test(app.id) || SHELF[i][2].test(app.title)) return SHELF[i];
@@ -117,16 +119,16 @@
   function pickShelf() {
     var chosen = Prefs.shelf(), out = [];
     if (chosen) {
-      for (var i = 0; i < chosen.length && out.length < MAX_SHELF; i++) {
+      for (var i = 0; i < chosen.length; i++) {
         for (var j = 0; j < apps.length; j++) if (apps[j].id === chosen[i]) out.push(apps[j]);
       }
     } else {
-      for (var s = 0; s < SHELF.length && out.length < MAX_SHELF; s++) {
+      for (var s = 0; s < SHELF.length && out.length < FEW_APPS; s++) {
         for (var a = 0; a < apps.length; a++) {
           if ((SHELF[s][1].test(apps[a].id) || SHELF[s][2].test(apps[a].title)) && out.indexOf(apps[a]) < 0) { out.push(apps[a]); break; }
         }
       }
-      if (!out.length) out = apps.slice(0, MAX_SHELF);
+      if (!out.length) out = apps.slice(0, FEW_APPS);
     }
     shelf = out;
     others = apps.filter(function (x) { return shelf.indexOf(x) < 0; });
@@ -154,6 +156,7 @@
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.CARDS && st.card === i);
     list = $('tiles').children;
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.SHELF && st.shelf === i);
+    revealShelf();
     list = document.querySelectorAll('#drawer .key');
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.DRAWER && st.drawer === i);
     list = document.querySelectorAll('#apps .cell');
@@ -286,8 +289,10 @@
 
   // MARK: - Shelf
 
+  var shelfFirst = 0, tileStep = 0, tileLeft = 0;
+
   function renderShelf() {
-    var n = shelf.length, gap = 48, pad = 40;
+    var n = Math.min(shelf.length, SHELF_VISIBLE), gap = 48, pad = 40;
     // 16:9 tiles, as on Android: never taller than 126, and the glass keeps its bottom edge.
     var tw = Math.min(126 * 16 / 9, (1760 - Math.max(0, n - 1) * gap) / Math.max(1, n)), th = tw * 9 / 16;
     var width = n * tw + Math.max(0, n - 1) * gap, left = (1920 - width) / 2;
@@ -300,16 +305,51 @@
     $('quotes').style.right = (1920 - left - width) + 'px';
     var tiles = $('tiles');
     tiles.innerHTML = '';
-    for (var i = 0; i < n; i++) {
+    tileStep = tw + gap;
+    tileLeft = left;
+    shelfFirst = Math.max(0, Math.min(shelfFirst, shelf.length - n));
+    for (var i = 0; i < shelf.length; i++) {
       var t = el('div', 'tile', tiles);
-      t.style.left = (left + i * (tw + gap)) + 'px';
       t.style.top = (854 + 126 - th) + 'px';
       t.style.width = tw + 'px';
       t.style.height = th + 'px';
       face(shelf[i], t, wordFit(shelf[i].title, tw, 30));
       hover(t, Z.SHELF, i);
     }
-    st.shelf = Math.min(st.shelf, Math.max(0, n - 1));
+    // More apps than fit: an arrow in the glass's edge on each side that has more.
+    platter.innerHTML = '';
+    for (var a = 0; a < 2; a++) {
+      var arrow = sym('chevron_right', platter);
+      arrow.className += a ? ' more' : ' more back';
+      arrow.style.left = (a ? width + pad * 1.5 : pad / 2) - 11 + 'px';
+      arrow.style.top = (pad + th / 2 - 11) + 'px';
+    }
+    st.shelf = Math.min(st.shelf, Math.max(0, shelf.length - 1));
+    placeTiles();
+  }
+
+  /** The row slides (a transform on #tiles, which old TVs animate), and the apps it takes past the glass fade out. */
+  function placeTiles() {
+    var row = $('tiles'), tiles = row.children, n = Math.min(shelf.length, SHELF_VISIBLE);
+    for (var i = 0; i < shelf.length; i++) {
+      var shown = i >= shelfFirst && i < shelfFirst + n;
+      tiles[i].style.left = (tileLeft + i * tileStep) + 'px';
+      tiles[i].style.opacity = shown ? '' : '0';
+      tiles[i].style.pointerEvents = shown ? '' : 'none';
+    }
+    row.style.webkitTransform = row.style.transform = 'translateX(' + (-shelfFirst * tileStep) + 'px)';
+    var arrows = $('platter').children;
+    arrows[0].style.visibility = shelfFirst > 0 ? '' : 'hidden';
+    arrows[1].style.visibility = shelfFirst + n < shelf.length ? '' : 'hidden';
+  }
+
+  /** Scrolls the shelf, one app at a time, so the focused app is shown. */
+  function revealShelf() {
+    var n = Math.min(shelf.length, SHELF_VISIBLE);
+    var first = Math.max(0, Math.min(Math.max(shelfFirst, st.shelf - n + 1), Math.min(st.shelf, shelf.length - n)));
+    if (first === shelfFirst || !shelf.length) return;
+    shelfFirst = first;
+    placeTiles();
   }
 
   // MARK: - Drawer
@@ -607,10 +647,11 @@
     list.style.height = Math.min(e.rows.length, 7) * 78 + 'px';
     for (var i = 0; i < e.rows.length; i++) {
       var a = e.rows[i], at = e.ids.indexOf(a.id), row = el('div', 'row', holder, a.title);
-      el('span', 'value', row, at >= 0 ? '#' + (at + 1) : tr('shelf|Off'));
+      var place = el('span', 'value', row, at >= 0 ? '#' + (at + 1) : tr('shelf|Off'));
+      if (at >= 0) sym('check', place).style.marginLeft = '16px';   // on the shelf: a check, as in the pickers
       hover(row, Z.EDIT, i);
     }
-    el('div', 'hint', box, trf('OK adds or removes (up to {n}). ← → change the order.', {n: MAX_SHELF}));
+    el('div', 'hint', box, tr('OK adds or removes an app. ← → change the order.'));
     updateFocus();
   }
 
@@ -629,8 +670,7 @@
     var ids = e.ids.slice(), at = ids.indexOf(app.id);
     if (dx === 0) {
       if (at >= 0) ids.splice(at, 1);
-      else if (ids.length < MAX_SHELF) ids.push(app.id);
-      else { toast(trf('The shelf holds up to {n} apps.', {n: MAX_SHELF})); return; }
+      else ids.push(app.id);
     } else {
       if (at < 0) return;
       var to = Math.max(0, Math.min(ids.length - 1, at + dx));

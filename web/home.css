@@ -298,6 +298,14 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32), inset 0 1.5px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
+#tiles {
+  position: absolute;
+  left: 0;
+  top: 0;
+  -webkit-transition: -webkit-transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
 .tile {
   position: absolute;
   top: 854px;
@@ -306,8 +314,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   overflow: hidden;
   color: #FFF;
   box-shadow: 0 4px 22px rgba(0, 0, 0, 0.14);
-  -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.2s;
-  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.2s;
+  -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.2s, opacity 0.3s;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2), box-shadow 0.2s, opacity 0.3s;
 }
 .tile img { position: absolute; left: 50%; top: 50%; max-width: 76%; max-height: 62%; -webkit-transform: translate(-50%, -50%); transform: translate(-50%, -50%); }
 .tile .word {
@@ -343,6 +351,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .tile.focus::after { opacity: 1; }
 .night .tile { box-shadow: 0 4px 22px rgba(0, 0, 0, 0.3); }
 .night .tile.focus { box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6); }
+.more { position: absolute; width: 22px; height: 22px; color: rgba(0, 0, 0, 0.4); }
+.more.back { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
+.night .more { color: rgba(255, 255, 255, 0.4); }
 
 /* MARK: - Drawer: inputs and shortcuts, weather, prices */
 
