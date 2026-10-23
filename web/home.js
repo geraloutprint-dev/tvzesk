@@ -226,6 +226,29 @@
     }
   }
 
+  // MARK: - Wallpapers (wallpapers=true): open-licensed photos behind the home screen, a new one every few minutes
+
+  var WALLS = (CONFIG.wallpapers || []).slice(), wallAt = 0, wallFront = 'wpA', wallTries = 0;
+  var WALL_EVERY = (CONFIG.wallpaperMinutes || 3) * 60000;
+  WALLS.sort(function () { return Math.random() - 0.5; });   // a different order each time the app opens
+
+  /** Fades to the next wallpaper once it has loaded; one that won't load is skipped. */
+  function nextWall() {
+    if (!WALLS.length || document.hidden) return;
+    var p = WALLS[wallAt++ % WALLS.length], img = new Image();
+    img.onload = function () {
+      wallTries = 0;
+      var back = wallFront === 'wpA' ? 'wpB' : 'wpA';
+      $(back).style.backgroundImage = 'url(' + p.url + ')';
+      setClass($(back), 'on', true);
+      setClass($(wallFront), 'on', false);
+      wallFront = back;
+      $('credit').textContent = p.title + ' · ' + p.credit;
+    };
+    img.onerror = function () { if (++wallTries < 5) nextWall(); };
+    img.src = p.url;
+  }
+
   // MARK: - Picks and background
 
   function renderCards() {
@@ -258,7 +281,7 @@
 
   /** The first pick's photo as the background: drawn tiny and stretched, it's already as soft as a heavy blur. */
   function backdrop(url) {
-    if (url === bgUrl) return;
+    if (WALLS.length || url === bgUrl) return;   // with wallpapers, they're the background
     bgUrl = url;
     var next = bgFront === 'bgA' ? 'bgB' : 'bgA';
     if (!url) {
@@ -807,6 +830,7 @@
 
   function showSaver() {
     var photos = Data.showcase().filter(function (p) { return p.backdrop && Data.appFor(p.app); });
+    if (!photos.length) photos = WALLS;   // no picks: the wallpapers (url instead of backdrop, credited)
     saverOn = true;
     var s = $('saver');
     s.innerHTML = '';
@@ -822,9 +846,9 @@
       var p = photos.length ? photos[saverIndex++ % photos.length] : null;
       var back = front === a ? b : a;
       if (p) {
-        back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'original') + ')';
+        back.style.backgroundImage = 'url(' + (p.url || Data.image(p.backdrop, 'original')) + ')';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
-        clock.lastChild.textContent = p.title;
+        clock.lastChild.textContent = p.credit ? p.title + ' · ' + p.credit : p.title;
         setTimeout(function () {
           setClass(back, 'on', true);
           setClass(front, 'on', false);
@@ -938,11 +962,17 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { hideSaver(); return; }
     idleAt = Date.now();
+    if (WALLS.length && !$(wallFront).style.backgroundImage) nextWall();   // it opened hidden: no wallpaper yet
     loadApps(function () { renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
   });
 
   I18N.set(Prefs.language());
   fit();
+  if (WALLS.length) {
+    setClass(body, 'walls', true);
+    nextWall();
+    setInterval(nextWall, WALL_EVERY);
+  }
   renderTop();
   loadApps(function () {
     renderAll();
