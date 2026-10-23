@@ -299,6 +299,13 @@ var TV = (function () {
         // Denied to Developer Mode apps (webOS 6 and newer): once the TV has allowed the remote control API, it lists
         // every app with its icon; until then, the known apps the TV says it has, while the TV asks once (an answer
         // only counts from the next load on, and a "no" isn't asked again).
+        // webOS 3 has neither getAppLoadStatus nor a remote control API that takes file:// pages ("invalid origin"):
+        // there the list comes from the computer (tools/lg_apps.mjs), built into the app.
+        var built = (window.CONFIG && CONFIG.installedApps) || [];
+        if (built.length) {
+          done(built.filter(function (a) { return a.id !== self && !HIDDEN.test(a.id); }));
+          return;
+        }
         var paired = false, refused = false;
         try { paired = !!localStorage.getItem(SSAP_KEY); refused = !!localStorage.getItem(SSAP_REFUSED); } catch (e) {}
         if (paired) {

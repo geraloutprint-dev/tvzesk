@@ -87,6 +87,13 @@ With an AI assistant, say *"Install Free My TV (github.com/simbasjungles/free-my
 
 Developer Mode lasts about 40 days: open the Developer Mode app now and then and press **EXTEND**. To remove Free My TV, run `python3 webos/install.py 192.168.1.50 --uninstall`.
 
+**Shelf empty on an older LG TV (webOS 3)?** Those TVs don't let Free My TV see their apps at all. Your computer can ask the TV instead (it asks once to allow it), and the list and icons are built into the app. Run it again after installing new apps:
+```bash
+node tools/lg_apps.mjs 192.168.1.50 && python3 webos/build.py && python3 webos/install.py 192.168.1.50
+```
+
+**Wallpapers (LG and Samsung).** `wallpapers=true` in `config.properties` puts open-licensed photos behind the home screen, Wikimedia Commons featured pictures each credited on screen, a new one every `wallpaper_minutes`. `wallpaper_topics` picks from landscapes, mountains, coasts, forests and astronomy. They're chosen when you build, and the screensaver shows them too when there are no picks.
+
 ## Samsung TVs (Tizen)
 
 The same home screen as a Samsung app, with everything the LG one has: the picks, the shelf, the drawer with the inputs, the weather and the prices, day and night, and its own settings. It installs through Samsung's own Developer Mode, with nothing rooted or changed on the TV, and Samsung's home screen stays where it is.

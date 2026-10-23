@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import translate  # noqa: E402  (the catalogues and the keys the web app uses)
 
 GENERIC = {'tmdbKey': '', 'tmdbRegion': '', 'latitude': '', 'longitude': '', 'city': '', 'language': 'auto',
-           'currency': '', 'temperature': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': []}
+           'currency': '', 'temperature': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': [],
+           'wallpapers': False, 'wallpaperTopics': [], 'wallpaperMinutes': 3, 'localApps': False}
 
 
 def config_from_args(args):
@@ -58,7 +59,85 @@ def read_config(path):
         'showCrypto': values.get('show_crypto', 'true').lower() != 'false',
         'hideAnimation': values.get('hide_animation', 'false').lower() == 'true',
         'hideApps': [s.strip() for s in values.get('hide_apps', '').split(',') if s.strip()],
+        'wallpapers': values.get('wallpapers', 'false').lower() == 'true',
+        'wallpaperTopics': [s.strip() for s in values.get('wallpaper_topics', '').split(',') if s.strip()]
+                           or list(WALLPAPER_TOPICS),
+        'wallpaperMinutes': int(float(number('wallpaper_minutes', '3'))) or 3,
+        'localApps': True,   # webos-apps.local.json is this TV's: never in a --generic build
     }
+
+
+# wallpapers=true: featured pictures from Wikimedia Commons (each CC BY, CC BY-SA, CC0 or public domain, credited on
+# screen), by topic. They're picked when the app is built; the TV loads each photo at 1920 px from Wikimedia.
+WALLPAPER_TOPICS = {
+    'landscapes': 'Featured pictures of landscapes',
+    'mountains': 'Featured pictures of mountains',
+    'coasts': 'Featured pictures of coasts',
+    'forests': 'Featured pictures of forests',
+    'astronomy': 'Featured pictures of astronomy',
+}
+COMMONS = 'https://commons.wikimedia.org/w/api.php'
+FREE_LICENSE = re.compile(r'^(CC BY(-SA)? [\d.]+|CC0|Public domain|PD)', re.I)
+
+
+def commons(params):
+    import urllib.parse
+    import urllib.request
+    query = dict(params, format='json', formatversion='2')
+    req = urllib.request.Request(COMMONS + '?' + urllib.parse.urlencode(query),
+                                 headers={'User-Agent': 'FreeMyTV-build/1.0 (https://freemytv.io)'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+
+
+def plain(html_text):
+    import html
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', '', html_text or ''))).strip()
+
+
+def wallpapers(config, per_topic=40):
+    """[{url, title, credit}] for config['wallpaperTopics']: landscape-shaped (near 16:9), at least 1920 px wide."""
+    import random
+    out = []
+    for topic in config['wallpaperTopics']:
+        category = WALLPAPER_TOPICS.get(topic.lower())
+        if not category:
+            print('wallpaper_topics: unknown topic "%s" (known: %s)' % (topic, ', '.join(WALLPAPER_TOPICS)))
+            continue
+        titles = [m['title'] for m in commons({'action': 'query', 'list': 'categorymembers', 'cmtype': 'file',
+                                               'cmtitle': 'Category:' + category, 'cmlimit': '500'})['query']['categorymembers']]
+        random.shuffle(titles)
+        found = 0
+        for start in range(0, len(titles), 50):
+            if found >= per_topic:
+                break
+            pages = commons({'action': 'query', 'titles': '|'.join(titles[start:start + 50]), 'prop': 'imageinfo',
+                             'iiprop': 'url|size|extmetadata', 'iiurlwidth': '1920',
+                             'iiextmetadatafilter': 'Artist|LicenseShortName|ObjectName'})['query']['pages']
+            for page in pages:
+                info = (page.get('imageinfo') or [{}])[0]
+                meta = info.get('extmetadata', {})
+                w, h = info.get('width', 0), info.get('height', 0)
+                license_name = plain(meta.get('LicenseShortName', {}).get('value'))
+                if not (w >= 1920 and h and 1.45 <= w / h <= 1.95 and FREE_LICENSE.match(license_name)):
+                    continue
+                name = plain(meta.get('ObjectName', {}).get('value')) or re.sub(r'^File:|\.\w+$', '', page['title'])
+                artist = plain(meta.get('Artist', {}).get('value'))
+                credit = ', '.join(x for x in (artist, license_name, 'Wikimedia Commons') if x)
+                out.append({'url': info['thumburl'], 'title': name, 'credit': credit})
+                found += 1
+                if found >= per_topic:
+                    break
+    return out
+
+
+def installed_apps():
+    """webos-apps.local.json (tools/lg_apps.mjs), for TVs that won't list their apps to Free My TV: [] without it."""
+    path = os.path.join(ROOT, 'webos-apps.local.json')
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
 
 
 def coins():
@@ -89,6 +168,23 @@ def files(config, made_by):
     for name in sorted(os.listdir(icons)):
         with open(os.path.join(icons, name), 'rb') as f:
             out['icons/' + name] = f.read()
+    config = dict(config)
+    if config.get('wallpapers'):
+        try:
+            config['wallpapers'] = wallpapers(config)
+            print('Wallpapers: %d photos from Wikimedia Commons (%s)' % (len(config['wallpapers']),
+                                                                       ', '.join(config['wallpaperTopics'])))
+        except Exception as e:
+            print('Wallpapers: couldn\'t reach Wikimedia Commons (%s); building without them.' % e)
+            config['wallpapers'] = []
+    else:
+        config['wallpapers'] = []
+    config['installedApps'] = installed_apps() if config.pop('localApps', False) else []
+    app_icons = os.path.join(ROOT, 'webos-icons.local')
+    if config['installedApps'] and os.path.isdir(app_icons):
+        for name in sorted(os.listdir(app_icons)):
+            with open(os.path.join(app_icons, name), 'rb') as f:
+                out['appicons/' + name] = f.read()
     out['config.js'] = ('/* Generated by %s. */\nwindow.CONFIG = %s;\n'
                         % (made_by, json.dumps(config, ensure_ascii=False))).encode('utf-8')
     out['coins.js'] = ('window.COINS = %s;\n' % json.dumps(coins())).encode('utf-8')
