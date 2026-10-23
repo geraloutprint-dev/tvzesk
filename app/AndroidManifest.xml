@@ -30,6 +30,10 @@
         <package android:name="com.google.android.tv" />
         <package android:name="com.mediatek.wwtv.tvcenter" />
         <package android:name="com.sony.dtv.tvx" />
+        <!-- HY300 projectors: keystone and Miracast (drawer shortcuts), Allwinner's player for HDMI -->
+        <package android:name="com.htc.htcsettings" />
+        <package android:name="com.softwinner.miracastReceiver" />
+        <package android:name="com.softwinner.awlivetv" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />

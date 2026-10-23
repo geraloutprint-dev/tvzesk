@@ -54,7 +54,7 @@ import java.util.regex.Pattern;
 final class HomeApps {
     private HomeApps() {}
 
-    static final int APP = 0, LIVE_TV = 1, INPUT = 2, ALL_APPS = 3, SETTINGS = 4, ANDROID_SETTINGS = 5;
+    static final int APP = 0, LIVE_TV = 1, INPUT = 2, ALL_APPS = 3, SETTINGS = 4, ANDROID_SETTINGS = 5, DEVICE = 6;
     /** The "HDMI Inputs" button: opens the bottom drawer on the inputs (the home screen handles it). */
     static final int INPUTS = 7;
     /** Image size of each card (16:9; on screen it shows up to ~330 px wide). */
@@ -64,6 +64,7 @@ final class HomeApps {
         int kind;
         String key, label, pkg, inputId, number;
         String uri;         // opens this address in the app instead of the app's home (a title's page)
+        Intent intent;      // DEVICE: the TV maker's own screen it opens
         String symbol;      // icon for the shortcuts and special cards
         Bitmap tile;        // 16:9 card (apps and specials)
         Bitmap logo;        // colored logo with no background (shelf); null = use the card
@@ -253,12 +254,24 @@ final class HomeApps {
     }
 
     /** Shortcuts in the bottom drawer. */
-    static List<Item> drawerShortcuts() {
+    static List<Item> drawerShortcuts(Context c) {
         List<Item> items = new ArrayList<>();
         items.add(shortcut(ALL_APPS, "all", Ui.tr("All Apps"), "apps"));
         items.add(shortcut(SETTINGS, "settings", Ui.tr("Home Settings"), "settings"));
         items.add(shortcut(ANDROID_SETTINGS, "tv-settings", Ui.tr("TV Settings"), "tv_settings"));
+        // HY300 projectors (Hotack, Allwinner H713): keystone and focus live in the maker's settings app, and the
+        // stock home screen was the only way to its Miracast receiver. Each shows only where the TV has it.
+        device(c, items, "keystone", Ui.tr("Keystone"), "keystone", new Intent("action.htcsettings.prjsettings"));
+        device(c, items, "mirroring", Ui.tr("Screen Mirroring"), "cast",
+                new Intent().setComponent(new ComponentName("com.softwinner.miracastReceiver", "com.softwinner.miracastReceiver.Miracast")));
         return items;
+    }
+
+    private static void device(Context c, List<Item> items, String key, String label, String symbol, Intent intent) {
+        if (c.getPackageManager().resolveActivity(intent, 0) == null) return;
+        Item it = shortcut(DEVICE, key, label, symbol);
+        it.intent = intent;
+        items.add(it);
     }
 
     /** A streaming service's app (the "Watch" button of the featured pick). */
@@ -346,7 +359,19 @@ final class HomeApps {
             out.add(it);
         }
         Collections.sort(out, (a, b) -> a.number.compareTo(b.number));
+        // Allwinner's player opens only HDMI 1 (HY300: one port, though the board lists three)
+        if (allwinnerInputs(c)) out.removeIf(it -> !"1".equals(it.number));
         return out;
+    }
+
+    /** Allwinner's live TV player (HY300 projectors), the stock home screen's way to HDMI: it ignores the input asked for. */
+    private static final ComponentName ALLWINNER_TV = new ComponentName("com.softwinner.awlivetv", "com.softwinner.awlivetv.MainActivity");
+
+    /** No app opens a passthrough input, but Allwinner's player is there. */
+    private static boolean allwinnerInputs(Context c) {
+        PackageManager pm = c.getPackageManager();
+        Intent view = new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput("x"));
+        return view.resolveActivity(pm) == null && new Intent().setComponent(ALLWINNER_TV).resolveActivity(pm) != null;
     }
 
     /** Words in a device's name, by the icon they pick: a game console, a streaming box, a sound system, a TV box. */
@@ -419,13 +444,18 @@ final class HomeApps {
                 intent = liveTv(a);
                 break;
             case INPUT:
-                intent = new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(it.inputId));
+                intent = allwinnerInputs(a) ? new Intent().setComponent(ALLWINNER_TV)
+                        : new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(it.inputId));
                 break;
             case SETTINGS:
                 intent = new Intent().setComponent(new ComponentName(a, SettingsActivity.class));
                 break;
             case ANDROID_SETTINGS:
                 intent = new Intent(Settings.ACTION_SETTINGS);
+                break;
+            case DEVICE:
+                // A fresh task: else Back walks through whatever the maker's settings app had open before
+                intent = new Intent(it.intent).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
                 break;
             default:
                 return false;
