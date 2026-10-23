@@ -4,6 +4,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.RuntimeShader;
@@ -37,6 +39,22 @@ final class Scene {
     private BitmapShader glassShaderA;
     private final boolean withGlass;
 
+    // Glass without AGSL (Android 8 to 12): the blurred photo clipped to the shape, a tint, a soft sheen from the top
+    // and a light rim brighter at the top left, like light catching the edge. No allocations while drawing: the
+    // gradients are unit-sized and placed with a matrix.
+    private Bitmap flatGlassA, flatGlassB;
+    private BitmapShader flatFrostShader, flatShaderA, flatShaderB;
+    private float flatMix, offX, offY;
+    private final Paint flatImage = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint flatSheen = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint flatEdge = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Matrix flatMatrix = new Matrix();
+    private final RectF flatRect = new RectF();
+    private final LinearGradient sheenUnit = new LinearGradient(0, 0, 0, 1,
+            new int[] {0x30FFFFFF, 0x0CFFFFFF, 0x00FFFFFF, 0x0A000000}, new float[] {0, 0.42f, 0.7f, 1}, Shader.TileMode.CLAMP);
+    private final LinearGradient rimUnit = new LinearGradient(0, 0, 1, 1,
+            new int[] {0xB3FFFFFF, 0x33FFFFFF, 0x0FFFFFFF, 0x4DFFFFFF}, new float[] {0, 0.28f, 0.62f, 1}, Shader.TileMode.CLAMP);
+
     Scene() {
         this(true);
     }
@@ -60,6 +78,9 @@ final class Scene {
         flatRim.setStyle(Paint.Style.STROKE);
         flatRim.setColor(0x33FFFFFF);
         flatRim.setStrokeWidth(1.5f);
+        flatSheen.setShader(sheenUnit);
+        flatEdge.setStyle(Paint.Style.STROKE);
+        flatEdge.setShader(rimUnit);
     }
 
     void setSize(int width, int height) {
@@ -125,7 +146,16 @@ final class Scene {
     /** Photo transition: both photos in the glass, blended by setGlassMix (0 = the first one). */
     void setGlassImages(int[] from, int[] to) {
         imageGlass = true;
-        if (liquid == null) return;     // no AGSL (Android 8 to 12): the glass is a flat fill, nothing reads the images
+        if (liquid == null) {           // no AGSL (Android 8 to 12): the flat glass draws the photo itself
+            flatGlassA = fill(flatGlassA, from);
+            if (flatShaderA == null) flatShaderA = new BitmapShader(flatGlassA, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            if (to != null) {
+                flatGlassB = fill(flatGlassB, to);
+                if (flatShaderB == null) flatShaderB = new BitmapShader(flatGlassB, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            }
+            flatMix = 0;
+            return;
+        }
         glassA = fill(glassA, from);
         if (to != null) glassB = fill(glassB, to);
         glassShaderA = linear(glassA);
@@ -136,7 +166,8 @@ final class Scene {
     }
 
     void setGlassMix(float t) {
-        if (liquid != null) liquid.setFloatUniform("mixB", Math.max(0, Math.min(1, t)));
+        flatMix = Math.max(0, Math.min(1, t));
+        if (liquid != null) liquid.setFloatUniform("mixB", flatMix);
     }
 
     /** The liquid glass goes back to the frosted aurora. */
@@ -166,7 +197,7 @@ final class Scene {
                 float specular, float alpha) {
         if (alpha <= 0.004f) return;
         if (liquid == null) {
-            glass(c, r, radius, tint, Math.max(0.5f, tintAlpha), 0, 0, lift, 1, alpha);
+            flatGlass(c, r, radius, tint, Math.min(0.85f, tintAlpha + 0.06f), 0, 0, lift, 1, alpha, true);
             return;
         }
         liquid.setFloatUniform("center", r.centerX(), r.centerY());
@@ -185,9 +216,12 @@ final class Scene {
     /** The glass now reads the blurred background image (Backdrop.FW × FH, ARGB). */
     void setFrost(int[] pixels) {
         imageFrost = true;
-        if (glass == null) return;      // as above: no shader reads the frosted image
         if (frostImage == null) frostImage = Bitmap.createBitmap(Backdrop.FW, Backdrop.FH, Bitmap.Config.ARGB_8888);
         frostImage.setPixels(pixels, 0, Backdrop.FW, 0, 0, Backdrop.FW, Backdrop.FH);
+        if (glass == null) {            // as above: the flat glass draws it
+            if (flatFrostShader == null) flatFrostShader = new BitmapShader(frostImage, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            return;
+        }
         BitmapShader s = new BitmapShader(frostImage, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         s.setFilterMode(BitmapShader.FILTER_MODE_LINEAR);
         glass.setInputShader("frost", s);
@@ -209,6 +243,8 @@ final class Scene {
 
     /** Offset (px) of the layer that will draw glass, if it was moved on screen without being redrawn. */
     void setOffset(float x, float y) {
+        offX = x;
+        offY = y;
         if (glass != null) glass.setFloatUniform("offset", x, y);
         if (liquid != null) liquid.setFloatUniform("offset", x, y);
     }
@@ -252,11 +288,7 @@ final class Scene {
     void glass(Canvas c, RectF r, float radius, int tint, float tintAlpha, int glow, float glowAlpha, float lift, float body, float alpha) {
         if (alpha <= 0.004f) return;
         if (glass == null) {
-            if (body > 0) {
-                flatFill.setColor(Ui.alpha(tint | 0xFF000000, Math.max(0.35f, tintAlpha)));
-                c.drawRoundRect(r, radius, radius, flatFill);
-            }
-            c.drawRoundRect(r, radius, radius, flatRim);
+            flatGlass(c, r, radius, tint, tintAlpha, glow, glowAlpha, lift, body, alpha, false);
             return;
         }
         float hw = r.width() / 2, hh = r.height() / 2, inner = Math.min(hw, hh);
@@ -273,5 +305,59 @@ final class Scene {
         glassPaint.setAlpha(Math.round(255 * Math.min(1, alpha)));
         c.drawRect(r.left - 1, r.top - 1, r.right + 1, r.bottom + 1, glassPaint);
         glassPaint.setAlpha(255);
+    }
+
+    /**
+     * Glass without AGSL. `sharp`: the lightly blurred photo (the shelf's Liquid Glass); otherwise the frosted one
+     * (cards, buttons, the drawer). Without a photo it's a tinted fill with the same sheen and rim.
+     */
+    private void flatGlass(Canvas c, RectF r, float radius, int tint, float tintAlpha, int glow, float glowAlpha,
+                           float lift, float body, float alpha, boolean sharp) {
+        float a = Math.min(1, alpha);
+        radius = Math.min(radius, Math.min(r.width(), r.height()) / 2);
+        if (body > 0) {
+            BitmapShader photo = sharp || flatFrostShader == null || !imageFrost ? flatShaderA : flatFrostShader;
+            if (!imageGlass && photo == flatShaderA) photo = null;
+            if (photo != null) {
+                flatImageDraw(c, r, radius, photo, photo == flatFrostShader ? Backdrop.FW : Backdrop.GW,
+                        photo == flatFrostShader ? Backdrop.FH : Backdrop.GH, a);
+                if (photo == flatShaderA && flatMix > 0.004f && flatShaderB != null)
+                    flatImageDraw(c, r, radius, flatShaderB, Backdrop.GW, Backdrop.GH, a * flatMix);
+            }
+            float fillAlpha = photo == null ? Math.max(0.35f, tintAlpha) : tintAlpha;
+            flatFill.setColor(Ui.alpha(tint | 0xFF000000, fillAlpha * a));
+            c.drawRoundRect(r, radius, radius, flatFill);
+            if (glowAlpha > 0.004f) {
+                flatFill.setColor(Ui.alpha(glow | 0xFF000000, glowAlpha * 0.6f * a));
+                c.drawRoundRect(r, radius, radius, flatFill);
+            }
+            flatMatrix.setScale(1, Math.max(1, r.height()));
+            flatMatrix.postTranslate(0, r.top);
+            sheenUnit.setLocalMatrix(flatMatrix);
+            flatSheen.setAlpha(Math.round(255 * a * Math.min(1, 0.7f + lift * 6)));
+            c.drawRoundRect(r, radius, radius, flatSheen);
+        }
+        // The rim: about 1.5 px on a 1080p screen, brightest at the top left.
+        float stroke = Math.max(1.2f, h / 720f);
+        flatRect.set(r);
+        flatRect.inset(stroke / 2, stroke / 2);
+        flatMatrix.setScale(Math.max(1, r.width()), Math.max(1, r.height()));
+        flatMatrix.postTranslate(r.left, r.top);
+        rimUnit.setLocalMatrix(flatMatrix);
+        flatEdge.setStrokeWidth(stroke);
+        flatEdge.setAlpha(Math.round(255 * a));
+        float rr = Math.max(0, radius - stroke / 2);
+        c.drawRoundRect(flatRect, rr, rr, flatEdge);
+    }
+
+    /** The photo (bw × bh, stretched over the screen) seen through `r`, as if the glass were a window onto it. */
+    private void flatImageDraw(Canvas c, RectF r, float radius, BitmapShader s, int bw, int bh, float alpha) {
+        flatMatrix.setScale((float) w / bw, (float) h / bh);
+        flatMatrix.postTranslate(-offX, -offY);
+        s.setLocalMatrix(flatMatrix);
+        flatImage.setShader(s);
+        flatImage.setAlpha(Math.round(255 * alpha));
+        c.drawRoundRect(r, radius, radius, flatImage);
+        flatImage.setShader(null);
     }
 }
