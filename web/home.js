@@ -489,6 +489,11 @@
           step: function () { if (Prefs.quotes()) { Prefs.setCoin(i, !Prefs.coin(i)); Data.settingsChanged(); } }});
       })(i);
     }
+    if (nuvio()) {
+      var open = Prefs.openPicks();
+      rows.push({label: tr('Open picks in'), value: open === 'nuvio' ? 'Nuvio' : tr('Streaming apps'),
+        step: function (d) { cycle('openPicks', ['apps', 'nuvio'], open, d); }});
+    }
     rows.push({label: tr('Shelf'), value: '›', step: function (d) { if (d >= 0) openShelfEdit(); }});
     rows.push({label: tr('TV Settings'), value: '›', step: function (d) { if (d >= 0) tvSettings(); }});
     return rows;
@@ -647,9 +652,15 @@
 
   // MARK: - Opening things
 
-  function launcher(id, name) {
+  /** Nuvio, when the TV has it: picks can open on its page there (Home Settings, Open picks in). */
+  function nuvio() {
+    for (var i = 0; i < apps.length; i++) if (/nuvio/i.test(apps[i].id) || /^nuvio/i.test(apps[i].title)) return apps[i];
+    return null;
+  }
+
+  function launcher(id, name, params) {
     return function () {
-      TV.launch(id, null, function (ok) {
+      TV.launch(id, params || null, function (ok) {
         if (!ok) toast(trf("Couldn't open {app}.", {app: name || id}));
       });
     };
@@ -675,8 +686,10 @@
         else openSettings();
         return;
       case Z.CARDS:
-        var p = cards[st.card], app = p && Data.appFor(p.app);
-        if (app) launcher(app.id, app.title)();
+        var p = cards[st.card], via = p && Prefs.openPicks() === 'nuvio' ? nuvio() : null;
+        var app = via || (p && Data.appFor(p.app));
+        // Nuvio's own link for the title, as on Android (nuvio://tmdb/movie/603); webOS apps get links as contentTarget.
+        if (app) launcher(app.id, app.title, via ? {contentTarget: 'nuvio://tmdb/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.id} : null)();
         return;
       case Z.SHELF:
         if (shelf[st.shelf]) launcher(shelf[st.shelf].id, shelf[st.shelf].title)();

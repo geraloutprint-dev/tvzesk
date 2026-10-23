@@ -119,6 +119,7 @@ The first values come from `config.properties`, created by the first build (Goog
 | `disable_assistant` | Also turn off Google Assistant | `false` |
 | `hide_services` | Streaming services to leave out of the picks even when their app is on the TV (`netflix`, `prime`, `disney`…), comma separated; for apps the TV ships that you don't subscribe to. Google TV only | empty |
 | `hide_apps` | Apps to leave out of the shelf, All Apps and the picks, by id or name (part of it), comma separated; for apps the TV ships that can't be uninstalled, like Samsung's built-in Netflix. LG and Samsung only | empty |
+| `open_picks_in` | Where a pick opens: `apps` (the streaming app that has it) or `nuvio` (its page in Nuvio, when the TV has it); Home Settings changes it on the TV. LG and Samsung only | `apps` |
 
 Changed something? Run `./build.sh` and install again. Keep `freemytv.keystore`: updates are signed with it.
 
