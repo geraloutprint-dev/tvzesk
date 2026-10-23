@@ -236,6 +236,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private int w, h;
     private float k = 1;
     private String clockText = "", dateText = "", weatherLine = "";
+    /** "Off in 42 min" next to the round buttons while the sleep timer runs (Settings > Sleep Timer); "" otherwise. */
+    private String sleepText = "";
     private long weatherLineAt = -1;
     private int weatherLinePrefs = -1;
     private String weatherLineLanguage = "";
@@ -353,6 +355,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             updatePalette();
             checkNight(true);
             updatePicks();      // three new ones every hour
+            updateSleep();
             handler.postDelayed(this, 15_000);
         }
     };
@@ -750,6 +753,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         v.setAlpha(alpha);
         v.setTranslationY(translationY);
         v.setVisibility(alpha > 0.002f ? VISIBLE : INVISIBLE);
+    }
+
+    private void updateSleep() {
+        boolean here = Prefs.sleepShown() && !android.provider.Settings.canDrawOverlays(getContext());   // else SleepOverlay
+        int left = here ? SleepTimer.minutesLeft(getContext()) : 0;
+        String text = left == 0 ? "" : Ui.trf("Off in {n} min", "n", left);
+        if (text.equals(sleepText)) return;
+        sleepText = text;
+        statusDirty = true;
     }
 
     private boolean updateClock() {
@@ -2966,6 +2978,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 c.drawText(label, x, r.bottom + (40 + 4 * f) * k, lTip);
             }
         }
+        if (sleepText.isEmpty()) return;
+        float right = (lightButtons.isEmpty() ? CONTENT_R * k : topRects[3].left) - 28 * k, cy = L_BUTTON_CY * k;
+        float tw = lQuote.measureText(sleepText), size = lQuote.getTextSize();
+        c.drawText(sleepText, right - tw, cy + Ui.halfCap(lQuote), lQuote);
+        Symbols.draw(getContext(), c, "bedtime", right - tw - size * 0.9f, cy, size, lQuote.getColor());
     }
 
     private boolean moveLight(int dx, int dy) {

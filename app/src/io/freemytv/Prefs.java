@@ -139,6 +139,28 @@ final class Prefs {
         put("shelf", sb.toString());
     }
 
+    // MARK: - Sleep timer
+
+    /** When the sleep timer ends (System.currentTimeMillis); SleepTimer's alarm says whether it's still on. */
+    static long sleepAt() { return sp().getLong("sleepAt", 0); }
+
+    static void setSleepAt(long at) {
+        sp().edit().putLong("sleepAt", at).apply();
+        version++;
+    }
+
+    /** The sleep timer's minutes left on screen: over any app (SleepOverlay), or where this TV can't, on the home screen. */
+    static boolean sleepShown() { return sp().getBoolean("sleepShown", true); }
+    static void setSleepShown(boolean on) { put("sleepShown", on); }
+
+    /** Where it shows over other apps: SleepOverlay's places, the top center first. */
+    static int sleepPlace() { return sp().getInt("sleepPlace", 0); }
+
+    static void setSleepPlace(int place) {
+        sp().edit().putInt("sleepPlace", place).apply();
+        version++;
+    }
+
     // MARK: - Top buttons
 
     /**
