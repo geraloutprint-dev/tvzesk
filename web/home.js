@@ -95,20 +95,151 @@
     return Math.max(18, Math.min(max, Math.floor(width * 0.8 / (Math.max(4, title.length) * 0.56))));
   }
 
-  /** An app's face: its own icon on its brand color (or its name, when the icon can't be read). */
+  // MARK: - Logos
+
+  // The TV's icons are small squares with their own background (white behind Netflix, black behind Max). Like the
+  // Android app does with the TV art, the logo is lifted off it once: the background goes transparent and the rest is
+  // cropped to the logo, which then fills the tile on the brand's color.
+  var lifted = {};   // icon url -> {src, bg: [r, g, b], ink: luminance histogram} or false (keep the icon as it is)
+  var LIFT_SIZE = 240;
+
+  /** Relative luminance (0-1) of an sRGB color. */
+  function luminance(r, g, b) {
+    function lin(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+
+  function rgbOf(color) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(color || '');
+    if (m) { var n = parseInt(m[1], 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+    m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(color || '');
+    return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+  }
+
+  function lift(img) {
+    var w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return false;
+    var f = Math.min(1, LIFT_SIZE / Math.max(w, h));
+    w = Math.max(1, Math.round(w * f));
+    h = Math.max(1, Math.round(h * f));
+    var canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    var g = canvas.getContext('2d');
+    var data;
+    try {
+      g.drawImage(img, 0, 0, w, h);
+      data = g.getImageData(0, 0, w, h);
+    } catch (e) {
+      return false;   // a TV that doesn't let the page read its icons
+    }
+    var px = data.data;
+    // The background: the most common color a little inside the edges (rounded icons have transparent corners).
+    var votes = {}, best = null, bestN = 0, inset = Math.round(Math.min(w, h) * 0.08);
+    for (var s = 0; s < 64; s++) {
+      var t = s % 16 / 16, side = s >> 4;
+      var x = side < 2 ? Math.round(inset + t * (w - 2 * inset)) : side === 2 ? inset : w - 1 - inset;
+      var y = side < 2 ? (side === 0 ? inset : h - 1 - inset) : Math.round(inset + t * (h - 2 * inset));
+      var i = (y * w + x) * 4;
+      var key = px[i + 3] < 128 ? 'clear' : (px[i] >> 4) + ',' + (px[i + 1] >> 4) + ',' + (px[i + 2] >> 4);
+      votes[key] = (votes[key] || 0) + 1;
+      if (votes[key] > bestN) { bestN = votes[key]; best = key === 'clear' ? null : [px[i], px[i + 1], px[i + 2]]; }
+    }
+    var minX = w, minY = h, maxX = -1, maxY = -1, ink = [0, 0, 0, 0, 0, 0, 0, 0], inkSum = 0;
+    for (var p = 0; p < w * h; p++) {
+      var j = p * 4, a = px[j + 3] / 255;
+      if (best) {
+        // color to alpha: how far each channel is from the background, as a share of how far it could go, so the
+        // anti-aliased edges come out as the logo's color, partly clear, without a fringe of the background
+        var k = 0, c;
+        for (c = 0; c < 3; c++) {
+          var v = px[j + c], o = best[c];
+          k = Math.max(k, v > o ? (v - o) / Math.max(1, 255 - o) : (o - v) / Math.max(1, o));
+        }
+        k = Math.max(0, Math.min(1, (k - 0.1) / 0.9));   // compression noise stays clear
+        if (k > 0 && k < 1) {
+          for (c = 0; c < 3; c++) px[j + c] = Math.max(0, Math.min(255, best[c] + (px[j + c] - best[c]) / k));
+        }
+        a *= k;
+      }
+      px[j + 3] = Math.round(a * 255);
+      if (a > 0.3) {
+        var px0 = p % w, py0 = (p / w) | 0;
+        if (px0 < minX) minX = px0;
+        if (px0 > maxX) maxX = px0;
+        if (py0 < minY) minY = py0;
+        if (py0 > maxY) maxY = py0;
+        ink[Math.min(7, Math.floor(Math.sqrt(luminance(px[j], px[j + 1], px[j + 2])) * 8))] += a;
+        inkSum += a;
+      }
+    }
+    // Nothing left, or nothing taken away (a picture rather than a logo on a background): keep the icon.
+    if (maxX < 0 || (maxX - minX > w * 0.96 && maxY - minY > h * 0.96)) return false;
+    var crop = document.createElement('canvas');
+    crop.width = maxX - minX + 1;
+    crop.height = maxY - minY + 1;
+    g.putImageData(data, 0, 0);
+    crop.getContext('2d').drawImage(canvas, minX, minY, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    for (var b = 0; b < 8; b++) ink[b] /= inkSum;
+    try {
+      return {src: crop.toDataURL('image/png'), bg: best, ink: ink};
+    } catch (e2) {
+      return false;
+    }
+  }
+
+  /**
+   * Share of the logo that hardly shows on a tile of this luminance (YouTube's black type on a dark tile). Each bin
+   * of the histogram holds the ink whose square-root luminance falls in it.
+   */
+  function unseen(ink, tileLum) {
+    var share = 0;
+    for (var b = 0; b < 8; b++) {
+      var l = Math.pow((b + 0.5) / 8, 2);
+      if ((Math.max(l, tileLum) + 0.05) / (Math.min(l, tileLum) + 0.05) < 1.8) share += ink[b];
+    }
+    return share;
+  }
+
+  function paint(box, top, bottom) {
+    box.style.background = '-webkit-linear-gradient(top, ' + top + ', ' + bottom + ')';
+    box.style.background = 'linear-gradient(' + top + ', ' + bottom + ')';
+  }
+
+  function showLogo(img, box, top, bottom, logo) {
+    img.className = 'logo';
+    img.src = logo.src;
+    var a = rgbOf(top), z = rgbOf(bottom);
+    var tileLum = (luminance(a[0], a[1], a[2]) + luminance(z[0], z[1], z[2])) / 2;
+    if (logo.bg && unseen(logo.ink, tileLum) > 0.35) {
+      // the logo only reads on its own background: the tile takes it
+      var bg = 'rgb(' + logo.bg.join(',') + ')';
+      var hex = '#' + ((1 << 24) | (logo.bg[0] << 16) | (logo.bg[1] << 8) | logo.bg[2]).toString(16).slice(1);
+      paint(box, bg, darken(hex, 0.93));
+    }
+  }
+
+  /** An app's face: its logo on its brand color (or its name, when the icon can't be read). */
   function face(app, box, wordSize) {
     var k = shelfKey(app);
     var top = k ? k[3][0] : app.color ? darken(app.color, 0.92) : '#2A2A2E';
     var bottom = k ? k[3][1] : app.color ? darken(app.color, 0.62) : '#161618';
-    box.style.background = '-webkit-linear-gradient(top, ' + top + ', ' + bottom + ')';
-    box.style.background = 'linear-gradient(' + top + ', ' + bottom + ')';
+    paint(box, top, bottom);
     var word = el('div', 'word', box, app.title);
     if (wordSize) word.style.fontSize = wordSize + 'px';
     if (app.icon) {
-      var img = el('img', '', box);
+      var img = el('img', '', box), url = app.icon;
       word.style.visibility = 'hidden';
-      img.onerror = function () { img.parentNode.removeChild(img); word.style.visibility = ''; };
-      img.src = app.icon;
+      img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); word.style.visibility = ''; };
+      if (lifted[url]) { showLogo(img, box, top, bottom, lifted[url]); return; }
+      if (lifted[url] !== false) {
+        img.onload = function () {
+          img.onload = null;
+          if (lifted[url] === undefined) lifted[url] = lift(img);
+          if (lifted[url]) showLogo(img, box, top, bottom, lifted[url]);
+        };
+      }
+      img.src = url;
     }
   }
 
