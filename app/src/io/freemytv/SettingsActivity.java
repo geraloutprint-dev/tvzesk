@@ -117,6 +117,8 @@ public class SettingsActivity extends Activity {
         private static final float LIST_ROW_H = 68, LIST_ROW_GAP = 6;
         private static final int PICK_VISIBLE = 9;
         private static final float LIST_X = 1000, LIST_R = 1824, LIST_TOP = 186, ROW_GAP = 8, CHOICE_H = 104;
+        /** Rows that fit above the hint: Home Settings scrolls when it has more. */
+        private static final int LIST_VISIBLE = 10;
         // The main menu: seven rows, then the comparison, the picks (with the Watchmode credit) and two notices, all on
         // one 1080 px screen.
         private static final float MAIN_TOP = 140, ROW_H = 62, MAIN_GAP = 4;
@@ -262,7 +264,8 @@ public class SettingsActivity extends Activity {
                 top = LIST_TOP + 20 + row * (CHOICE_H + ROW_GAP);
                 height = CHOICE_H;
             } else {
-                top = LIST_TOP + 20 + row * (LIST_ROW_H + LIST_ROW_GAP);
+                int at = screen == HOME_SETTINGS || screen == REMOTE_KEYS ? row - listFirst() : row;
+                top = LIST_TOP + 20 + at * (LIST_ROW_H + LIST_ROW_GAP);
                 height = LIST_ROW_H;
             }
             focusBox.set(LIST_X * k, top * k, LIST_R * k, (top + height) * k);
@@ -637,11 +640,22 @@ public class SettingsActivity extends Activity {
         // MARK: - Home Settings and Remote Buttons
 
         private static final String[] UNITS = {"auto", "C", "F"}, THEMES = {"auto", "light", "dark"};
-        /** Home Settings: language, temperature, theme, sounds, weather, city, quotes, then one row per coin. */
-        private static final int CITY_ROW = 5, COIN_ROWS = 7;
+        /** Home Settings: language, temperature, theme, sounds, weather, city, quotes, local currency, then one row per coin. */
+        private static final int CITY_ROW = 5, LOCAL_ROW = 7;
 
+        /** The "Local currency" row only makes sense when config.properties isn't dollars already. */
+        private static boolean localRow() {
+            return !"USD".equalsIgnoreCase(Config.CURRENCY.trim());
+        }
+
+        /** First coin row: right after "Local currency" when that row is shown. */
+        private static int coinRows() {
+            return localRow() ? LOCAL_ROW + 1 : LOCAL_ROW;
+        }
+
+        /** The dollar card is only shown when the prices aren't already in dollars. */
         private boolean dollar() {
-            return "BRL".equalsIgnoreCase(Config.CURRENCY.trim());
+            return !"USD".equals(HomeData.currency());
         }
 
         private String[] settingLabels() {
@@ -653,10 +667,11 @@ public class SettingsActivity extends Activity {
             l.add(Ui.tr("Weather widget"));
             l.add(Ui.tr("City"));
             l.add(Ui.tr("Quotes widget"));
+            if (localRow()) l.add(Ui.tr("Local currency"));
             l.add("Bitcoin");
             l.add("Ethereum");
             l.add("Solana");
-            if (dollar()) l.add(Ui.tr("Dollar"));
+            if (dollar()) l.add("USDT");
             return l.toArray(new String[0]);
         }
 
@@ -673,8 +688,10 @@ public class SettingsActivity extends Activity {
             v[4] = onOff(Prefs.weather());
             v[CITY_ROW] = !cityStatus.isEmpty() ? cityStatus : Prefs.city().isEmpty() ? "—" : Prefs.city();
             v[6] = onOff(Prefs.quotes());
-            // No quotes widget, nowhere to show prices: the coins read as off (and stay locked) until it is back on.
-            for (int i = COIN_ROWS; i < v.length; i++) v[i] = onOff(Prefs.quotes() && Prefs.coin(i - COIN_ROWS));
+            // No quotes widget, nowhere to show prices: the currency and the coins read as off (and stay locked)
+            // until it is back on.
+            if (localRow()) v[LOCAL_ROW] = onOff(Prefs.quotes() && Prefs.localCurrency());
+            for (int i = coinRows(); i < v.length; i++) v[i] = onOff(Prefs.quotes() && Prefs.coin(i - coinRows()));
             return v;
         }
 
@@ -698,6 +715,8 @@ public class SettingsActivity extends Activity {
                     Ui.tr("Netflix button"), Ui.tr("Disney+ button"),
                     Ui.tr("Prime Video button"), Ui.tr("YouTube button"),
                     Ui.tr("Crunchyroll button"), Ui.tr("Google Play button")};
+            if (RemoteKeys.KALLEY) return new String[] {Ui.tr("Netflix button"),
+                    Ui.tr("YouTube button"), Ui.tr("Prime Video button")};
             return new String[] {Ui.tr("Netflix button"), Ui.tr("YouTube button"),
                     Ui.tr("Prime Video button"), Ui.tr("TCL Channel button")};
         }
@@ -756,7 +775,8 @@ public class SettingsActivity extends Activity {
                 case 6: Prefs.setQuotes(!Prefs.quotes()); break;
                 default:
                     if (!Prefs.quotes()) return;
-                    Prefs.setCoin(focus - COIN_ROWS, !Prefs.coin(focus - COIN_ROWS));
+                    if (focus == LOCAL_ROW && localRow()) Prefs.setLocalCurrency(!Prefs.localCurrency());
+                    else Prefs.setCoin(focus - coinRows(), !Prefs.coin(focus - coinRows()));
                     break;
             }
             HomeData.get(getContext()).settingsChanged();
@@ -811,6 +831,12 @@ public class SettingsActivity extends Activity {
                     if (!message.isEmpty()) handler.postDelayed(() -> { cityStatus = ""; invalidate(); }, 4000);
                 });
             }).start();
+        }
+
+        /** First row drawn: follows the focus when the list has more rows than fit. */
+        private int listFirst() {
+            int n = screen == HOME_SETTINGS ? settingLabels().length : rowCount();
+            return Math.max(0, Math.min(focus - LIST_VISIBLE + 1, n - LIST_VISIBLE));
         }
 
         private boolean scrolling() {
@@ -962,20 +988,22 @@ public class SettingsActivity extends Activity {
             Paint heading = Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF);
             c.drawText(keys ? Ui.tr("Remote Buttons") : Ui.tr("Home Settings"),
                     LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
-            for (int i = 0; i < labels.length; i++) {
+            int first = listFirst(), shown = Math.min(LIST_VISIBLE, labels.length - first);
+            for (int i = 0; i < shown; i++) {
+                int at = first + i;
                 float y = (LIST_TOP + 20 + i * (LIST_ROW_H + LIST_ROW_GAP)) * k;
                 rowRect.set(LIST_X * k, y, LIST_R * k, y + LIST_ROW_H * k);
-                float f = drawRowBackground(c, i);
+                float f = drawRowBackground(c, Math.min(at, pop.length - 1));
                 rowLabel.setColor(blend(0xF2FFFFFF, INK, f));
-                boolean locked = !keys && i >= COIN_ROWS && !Prefs.quotes();
+                boolean locked = !keys && at >= LOCAL_ROW && !Prefs.quotes();
                 rowValue.setColor(blend(locked ? 0x59FFFFFF : 0xB3FFFFFF, locked ? 0x591C1C1E : 0xB31C1C1E, f));
                 if (locked) rowLabel.setColor(blend(0x73FFFFFF, 0x731C1C1E, f));
                 float base = rowRect.centerY() + Ui.halfCap(rowLabel);
-                c.drawText(labels[i], rowRect.left + 30 * k, base, rowLabel);
-                c.drawText(values[i], rowRect.right - 30 * k, base, rowValue);
+                c.drawText(labels[at], rowRect.left + 30 * k, base, rowLabel);
+                c.drawText(values[at], rowRect.right - 30 * k, base, rowValue);
             }
             Paint hint = Ui.text(Ui.regular, 23 * k, 0x8CFFFFFF);
-            float hy = (LIST_TOP + 20 + labels.length * (LIST_ROW_H + LIST_ROW_GAP) + 36) * k;
+            float hy = (LIST_TOP + 20 + shown * (LIST_ROW_H + LIST_ROW_GAP) + 36) * k;
             c.drawText(Ui.tr("OK or the arrows change the value."), LIST_X * k + 30 * k, hy, hint);
             if (keys) {
                 c.drawText(RemoteKeys.VESTEL ? Ui.tr("YouTube, Prime Video and Google Play: the TV itself controls those buttons.")
