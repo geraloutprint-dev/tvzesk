@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import translate  # noqa: E402  (the catalogues and the keys the web app uses)
 
 GENERIC = {'tmdbKey': '', 'tmdbRegion': '', 'latitude': '', 'longitude': '', 'city': '', 'language': 'auto',
-           'currency': '', 'temperature': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': []}
+           'currency': '', 'temperature': 'auto', 'showCrypto': True, 'hideAnimation': False, 'hideApps': [], 'openPicksIn': 'apps'}
 
 
 def config_from_args(args):
@@ -58,6 +58,7 @@ def read_config(path):
         'showCrypto': values.get('show_crypto', 'true').lower() != 'false',
         'hideAnimation': values.get('hide_animation', 'false').lower() == 'true',
         'hideApps': [s.strip() for s in values.get('hide_apps', '').split(',') if s.strip()],
+        'openPicksIn': 'nuvio' if values.get('open_picks_in', '').strip().lower() == 'nuvio' else 'apps',
     }
 
 
