@@ -17,6 +17,8 @@ import android.view.KeyEvent;
  * On KTC TVs (NextStar) only the Tabii button is ours, a global key too: the TV's hot-key receiver opens Tabii with it.
  * On Sony TVs, the app buttons (and the Google Play button of older remotes) are global keys for Sony's own receiver;
  * the filter sees them first, the same way.
+ * On Xiaomi TVs sold in Russia, the Okko, VK, Rutube, KION, Wink and IVI buttons are global keys too, for Xiaomi's
+ * hot-key receiver (partnercustomizer's GlobalKeyReceiver).
  */
 final class RemoteKeys {
     private RemoteKeys() {}
@@ -31,9 +33,11 @@ final class RemoteKeys {
     static final boolean TCL = is("TCL"), VESTEL = is("Vestel"), KTC = is("KTC"), SONY = is("Sony"), FORMOVIE = is("Formovie");
     /** Brands whose Netflix button is STEM_1, a global key (MediaTek): only that button is ours. */
     static final boolean STEM_NETFLIX = VESTEL || FORMOVIE;
+    /** Xiaomi TVs (not the Formovie projectors above): the app buttons of the remotes sold in Russia. */
+    static final boolean XIAOMI = is("Xiaomi") && !STEM_NETFLIX;
 
     static boolean supported() {
-        return TCL || STEM_NETFLIX || KTC || SONY;
+        return TCL || STEM_NETFLIX || KTC || SONY || XIAOMI;
     }
 
     private static boolean is(String maker) {
